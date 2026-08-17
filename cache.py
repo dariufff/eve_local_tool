@@ -1,7 +1,13 @@
-"""Local SQLite cache so repeated lookups don't hammer ESI / zKillboard."""
+"""Cache so repeated lookups don't hammer ESI / zKillboard.
+
+Uses a local SQLite file by default. If TURSO_DATABASE_URL is set (e.g. on
+Render, where the local disk is wiped on every restart/deploy), it connects
+to a remote Turso database instead, so the cache survives restarts.
+"""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -9,37 +15,52 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "cache.db"
 TTL_SECONDS = 6 * 60 * 60  # 6 hours
 
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS character_cache (
-            character_id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            data TEXT NOT NULL,
-            fetched_at REAL NOT NULL
+if TURSO_URL:
+    import libsql
+
+_schema_ready = False
+
+
+def _connect():
+    global _schema_ready
+    if TURSO_URL:
+        conn = libsql.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+    else:
+        conn = sqlite3.connect(DB_PATH)
+    if not _schema_ready:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS character_cache (
+                character_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                data TEXT NOT NULL,
+                fetched_at REAL NOT NULL
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS type_name_cache (
-            type_id INTEGER PRIMARY KEY,
-            name TEXT,
-            category_id INTEGER,
-            group_name TEXT
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS type_name_cache (
+                type_id INTEGER PRIMARY KEY,
+                name TEXT,
+                category_id INTEGER,
+                group_name TEXT
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS group_category_cache (
-            group_id INTEGER PRIMARY KEY,
-            category_id INTEGER NOT NULL
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_category_cache (
+                group_id INTEGER PRIMARY KEY,
+                category_id INTEGER NOT NULL
+            )
+            """
         )
-        """
-    )
+        conn.commit()
+        _schema_ready = True
     return conn
 
 
