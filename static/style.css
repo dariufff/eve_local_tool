@@ -146,6 +146,14 @@ tr.danger-low .score-analyzed { color: var(--low); }
 .ship-kill { color: var(--low); }
 .ship-loss { color: var(--high); }
 
+.zkb-link {
+  text-decoration: none;
+  opacity: 0.7;
+  font-size: 0.85rem;
+}
+
+.zkb-link:hover { opacity: 1; }
+
 footer {
   max-width: 900px;
   margin: 2rem auto 0;

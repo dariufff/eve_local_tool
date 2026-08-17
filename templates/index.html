@@ -46,7 +46,10 @@
         <tbody>
           {% for r in results %}
           <tr class="danger-{{ 'high' if r.analyzed_score >= 60 else ('mid' if r.analyzed_score >= 20 else 'low') }}">
-            <td>{{ r.name }}</td>
+            <td>
+              {{ r.name }}
+              <a class="zkb-link" href="https://zkillboard.com/character/{{ r.character_id }}/" target="_blank" rel="noopener noreferrer" title="Ver perfil en zKillboard">🔗</a>
+            </td>
             <td>
               {{ r.corporation_name or '—' }}
               {% if r.alliance_name %}<br><span class="alliance">{{ r.alliance_name }}</span>{% endif %}
