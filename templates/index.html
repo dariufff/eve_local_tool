@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>EVE Local Tool — Evaluación de peligrosidad</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>EVE Local Tool</h1>
+    <p class="subtitle">Evaluación de peligrosidad a partir de una lista de personajes</p>
+    <p class="disclaimer">
+      Herramienta no oficial. No afiliada a ni respaldada por CCP hf.
+      Usa la API pública ESI y las estadísticas públicas de zKillboard.
+    </p>
+  </header>
+
+  <main>
+    <form method="post" action="{{ url_for('analyze') }}">
+      <label for="names">Pega la lista de personajes (uno por línea):</label>
+      <textarea id="names" name="names" rows="10" placeholder="Nombre Personaje Uno&#10;Nombre Personaje Dos">{{ raw_input }}</textarea>
+      <button type="submit">Analizar</button>
+    </form>
+
+    {% if unresolved %}
+      <div class="warning">
+        No se pudieron resolver estos nombres (revisa la ortografía):
+        {{ unresolved | join(', ') }}
+      </div>
+    {% endif %}
+
+    {% if results is not none %}
+      <table>
+        <thead>
+          <tr>
+            <th>Personaje</th>
+            <th>Corp / Alianza</th>
+            <th>Peligrosidad (analizado / zkb)</th>
+            <th>Stats recientes</th>
+            <th>Naves recientes</th>
+            <th>Nave favorita</th>
+            <th>Alertas</th>
+            <th>Compañía en la lista</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+          <tr class="danger-{{ 'high' if r.analyzed_score >= 60 else ('mid' if r.analyzed_score >= 20 else 'low') }}">
+            <td>{{ r.name }}</td>
+            <td>
+              {{ r.corporation_name or '—' }}
+              {% if r.alliance_name %}<br><span class="alliance">{{ r.alliance_name }}</span>{% endif %}
+            </td>
+            <td class="score">
+              <div class="score-analyzed" title="Puntaje zkb potenciado por corp/alianza/kills conjuntos de esta lista, descontado si el historial es principalmente padding">
+                {{ r.analyzed_score }}{% if r.net_pct %} <span class="{{ 'boost-tag' if r.net_pct > 0 else 'penalty-tag' }}">{{ '+' if r.net_pct > 0 else '' }}{{ r.net_pct }}%</span>{% endif %}
+              </div>
+              <div class="score-zkb muted" title="Indicador dangerRatio de zKillboard (histórico, no depende de esta lista)">zkb: {{ r.zkb_score }}</div>
+              {% if r.padding_penalty_pct %}
+                <div class="tag padding-tag" title="{{ (r.structure_isk_ratio * 100) | round(0, 'common') }}% del ISK destruido histórico es de estructuras/naves sin piloto; tamaño de flota promedio {{ r.avg_gang_size }}">
+                  ⚠ Historial con padding (-{{ r.padding_penalty_pct }}%)
+                </div>
+              {% endif %}
+              {% if r.recent_kill_activity_pct > 0 %}
+                <div class="tag hunter-tag" title="Su kill más reciente fue hace {{ r.days_since_last_kill }} días y no parece padding">
+                  🎯 Activo y letal (+{{ r.recent_kill_activity_pct }}%)
+                </div>
+              {% elif r.recent_kill_structure_ratio is not none and r.recent_kill_activity_pct < 0 %}
+                <div class="tag padding-tag" title="Sus últimos kills (hace {{ r.days_since_last_kill }} días) son {{ (r.recent_kill_structure_ratio * 100) | round(0, 'common') }}% estructuras/sin piloto, con flotas de {{ r.recent_kill_avg_gang_size }} atacantes en promedio">
+                  ⚠ Kills recientes = padding ({{ r.recent_kill_activity_pct }}%)
+                </div>
+              {% elif r.recent_kill_activity_pct < 0 %}
+                <div class="tag padding-tag" title="{{ ('Sin kills registrados en zKillboard' if r.days_since_last_kill is none else 'Su kill más reciente fue hace ' ~ r.days_since_last_kill ~ ' días') }} - posible alt/farmer">
+                  💤 {{ 'Sin actividad de combate' if r.days_since_last_kill is none else 'Inactivo hace mucho' }} ({{ r.recent_kill_activity_pct }}%)
+                </div>
+              {% endif %}
+            </td>
+            <td>
+              {% if r.activity_window %}
+                <span class="window-tag">{{ '3 días' if r.activity_window == '3d' else '7 días' }}</span><br>
+                K/D {{ r.recent_kills }} / {{ r.recent_losses }}<br>
+                <span class="muted">ISK dest. {{ '{:,.0f}'.format(r.recent_isk_destroyed) }} · perd. {{ '{:,.0f}'.format(r.recent_isk_lost) }}</span>
+              {% else %}
+                <span class="muted">Sin información reciente</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if r.recent_ships %}
+                {{ r.recent_ships | select | join(', ') }}
+              {% else %}
+                <span class="muted">Sin naves recientes</span>
+              {% endif %}
+            </td>
+            <td>{{ r.favorite_ship or '—' }}</td>
+            <td>
+              {% if r.cyno_ships %}
+                <span class="tag cyno-tag" title="Nave(s) con potencial de cyno vistas en su historial (kills/muertes): posible alt para traer una flota o capitales">🛸 Posible cyno: {{ r.cyno_ships | join(', ') }}</span><br>
+              {% endif %}
+              {% if r.blops_ships %}
+                <span class="tag blops-tag" title="Black Ops o bombardero sigiloso visto en su historial: posible hotdrop/bomber run">🏴 Blops/bombers: {{ r.blops_ships | join(', ') }}</span><br>
+              {% endif %}
+              {% if r.ewar_ships %}
+                <span class="tag ewar-tag" title="Nave(s) de guerra electrónica vistas en sus kills recientes: jams, damps, webs a distancia">📡 EWAR: {{ r.ewar_ships | join(', ') }}</span>
+              {% endif %}
+              {% if not r.cyno_ships and not r.blops_ships and not r.ewar_ships %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if r.same_corp_count %}
+                <span class="tag corp-tag">{{ r.same_corp_count }} de su corp en la lista</span><br>
+              {% endif %}
+              {% if r.same_alliance_count %}
+                <span class="tag corp-tag">{{ r.same_alliance_count }} de su alianza en la lista</span><br>
+              {% endif %}
+              {% if r.recent_allies %}
+                <span class="tag group-tag">Coordinó kills con: {{ r.recent_allies | join(', ') }}</span><br>
+              {% endif %}
+              {% if r.multibox_suspects %}
+                <span class="tag multibox-tag" title="Nombres de la lista con patrón similar (mismo nombre/apellido, sufijo numerado, o escritura casi idéntica)">👥 Posible multibox: {{ r.multibox_suspects | join(', ') }}</span>
+              {% endif %}
+              {% if not r.same_corp_count and not r.same_alliance_count and not r.recent_allies and not r.multibox_suspects %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8">No se encontraron datos para ningún personaje.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </main>
+</body>
+</html>
