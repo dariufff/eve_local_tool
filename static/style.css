@@ -142,3 +142,15 @@ tr.danger-low .score-analyzed { color: var(--low); }
 
 .boost-tag { font-size: 0.7rem; font-weight: 600; color: var(--high); }
 .penalty-tag { font-size: 0.7rem; font-weight: 600; color: var(--low); }
+
+footer {
+  max-width: 900px;
+  margin: 2rem auto 0;
+  text-align: center;
+}
+
+.credit {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
