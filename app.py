@@ -62,7 +62,7 @@ def _fetch_character_record(char_id: int, name: str, public_info: dict) -> dict:
         recent = EMPTY_ACTIVITY
 
     try:
-        kill_quality = eve_api.get_recent_kill_quality(char_id)
+        kill_quality = eve_api.get_recent_kill_quality(char_id, stats)
     except requests.RequestException:
         kill_quality = {"days_since_last_kill": None, "activity_pct": 0.0}
 

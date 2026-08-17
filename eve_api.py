@@ -535,10 +535,15 @@ KILL_COUNT_BONUS_PCT_PER_KILL = 2
 KILL_COUNT_BONUS_CAP_PCT = 20
 
 
-def get_recent_kill_quality(character_id: int) -> dict:
+def get_recent_kill_quality(character_id: int, stats: dict | None = None) -> dict:
     """Judges the pilot's most recent kills (not bound to zKillboard's 7-day
     pastSeconds cap) for genuine solo/small-gang activity vs. padding vs.
     long-term dormancy, and flags cyno/EWAR-capable hulls flown along the way.
+
+    `stats` is the pilot's all-time zKillboard stats (from get_zkill_stats),
+    used only to check the same danger/ISK/efficiency padding exemption
+    applied to the all-time score - a pilot that dangerous doesn't stop
+    being one just because their last 20 kills happened to be in a big fleet.
     """
     resp = SESSION.get(
         f"{ZKILL_BASE}/kills/characterID/{character_id}/",
@@ -598,7 +603,7 @@ def get_recent_kill_quality(character_id: int) -> dict:
     avg_gang_size = sum(len(km.get("attackers", []) or []) for km in sample) / len(sample)
 
     padding_pct = _padding_penalty_from_ratios(structure_ratio, avg_gang_size)
-    if padding_pct > 0:
+    if padding_pct > 0 and not (stats and _is_padding_exempt(stats)):
         activity_pct = -padding_pct
     else:
         base_boost = next(
