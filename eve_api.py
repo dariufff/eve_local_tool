@@ -174,16 +174,13 @@ def resolve_type_group_name(type_id: int) -> str | None:
 
 
 # Force Recons (Falcon, Arazu, Pilgrim, Rapier) and Covert Ops frigates
-# (Anathema, Buzzard, Cheetah, Helios) are the classic covert-cyno alt hulls,
-# plus the haulers that also carry covert/regular cynos. Combat Recons are
-# grouped under EWAR instead (see below) rather than double-counted here.
+# (Anathema, Buzzard, Cheetah, Helios) are the classic covert-cyno alt hulls.
+# Haulers excluded on purpose (too many legit logistics pilots, high false
+# positive rate). Combat Recons are grouped under EWAR instead (see below)
+# rather than double-counted here.
 CYNO_CAPABLE_GROUP_NAMES = {
     "Force Recon Ship",
     "Covert Ops",
-    "Blockade Runner",
-    "Deep Space Transport",
-    "Freighter",
-    "Jump Freighter",
 }
 
 # Black Ops battleships (Redeemer, Sin, Panther, Widow) and the stealth
