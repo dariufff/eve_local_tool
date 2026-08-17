@@ -19,6 +19,12 @@ import eve_api
 
 app = Flask(__name__)
 
+# Bump this whenever the scoring/padding/ship-filtering logic changes. Cached
+# records are tagged with the version they were computed under; a mismatch
+# is treated as a cache miss, so a code change invalidates stale results
+# immediately instead of waiting out cache.TTL_SECONDS (6h).
+SCORE_VERSION = 1
+
 # Per-character work (zKillboard stats/recent-kills/kill-quality calls) is
 # independent across characters, so it's parallelized with a thread pool -
 # network I/O releases the GIL while waiting, so this is a real speedup, not
@@ -113,6 +119,7 @@ def _fetch_character_record(char_id: int, name: str, public_info: dict) -> dict:
         "recent_isk_destroyed": recent.get("recent_isk_destroyed", 0),
         "recent_isk_lost": recent.get("recent_isk_lost", 0),
         "co_attacker_ids": recent.get("co_attacker_ids", []),
+        "score_version": SCORE_VERSION,
     }
     cache.set(char_id, name, record)
     return record
@@ -126,7 +133,7 @@ def build_report(names: list[str]) -> tuple[list[dict], list[str]]:
     to_fetch: list[tuple[int, str]] = []  # (character_id, name) not in cache
     for name, info in resolved.items():
         cached = cache.get(info["id"])
-        if cached is not None:
+        if cached is not None and cached.get("score_version") == SCORE_VERSION:
             results.append(cached)
         else:
             to_fetch.append((info["id"], name))
