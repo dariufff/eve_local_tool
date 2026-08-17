@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -22,12 +23,19 @@ if TURSO_URL:
     import libsql
 
 _schema_ready = False
+# Turso connections go over HTTP, so opening a fresh one for every single
+# get/set (there are dozens per character) is slow. Keep one per thread and
+# reuse it instead - _release() below skips closing it for that reason.
+_thread_local = threading.local()
 
 
 def _connect():
     global _schema_ready
     if TURSO_URL:
-        conn = libsql.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+        conn = getattr(_thread_local, "conn", None)
+        if conn is None:
+            conn = libsql.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+            _thread_local.conn = conn
     else:
         conn = sqlite3.connect(DB_PATH)
     if not _schema_ready:
@@ -64,6 +72,12 @@ def _connect():
     return conn
 
 
+def _release(conn) -> None:
+    """Close local sqlite3 connections; keep the reused Turso one open."""
+    if not TURSO_URL:
+        conn.close()
+
+
 def get(character_id: int) -> dict | None:
     conn = _connect()
     try:
@@ -72,7 +86,7 @@ def get(character_id: int) -> dict | None:
             (character_id,),
         ).fetchone()
     finally:
-        conn.close()
+        _release(conn)
     if not row:
         return None
     data_json, fetched_at = row
@@ -97,7 +111,7 @@ def set(character_id: int, name: str, data: dict) -> None:
         )
         conn.commit()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def get_type_name(type_id: int) -> str | None:
@@ -108,7 +122,7 @@ def get_type_name(type_id: int) -> str | None:
             "SELECT name FROM type_name_cache WHERE type_id = ?", (type_id,)
         ).fetchone()
     finally:
-        conn.close()
+        _release(conn)
     return row[0] if row else None
 
 
@@ -124,7 +138,7 @@ def set_type_name(type_id: int, name: str) -> None:
         )
         conn.commit()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def get_type_category(type_id: int) -> int | None:
@@ -135,7 +149,7 @@ def get_type_category(type_id: int) -> int | None:
             "SELECT category_id FROM type_name_cache WHERE type_id = ?", (type_id,)
         ).fetchone()
     finally:
-        conn.close()
+        _release(conn)
     return row[0] if row and row[0] is not None else None
 
 
@@ -151,7 +165,7 @@ def set_type_category(type_id: int, category_id: int) -> None:
         )
         conn.commit()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def get_type_group_name(type_id: int) -> str | None:
@@ -162,7 +176,7 @@ def get_type_group_name(type_id: int) -> str | None:
             "SELECT group_name FROM type_name_cache WHERE type_id = ?", (type_id,)
         ).fetchone()
     finally:
-        conn.close()
+        _release(conn)
     return row[0] if row and row[0] is not None else None
 
 
@@ -178,7 +192,7 @@ def set_type_group_name(type_id: int, group_name: str) -> None:
         )
         conn.commit()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def get_group_category(group_id: int) -> int | None:
@@ -189,7 +203,7 @@ def get_group_category(group_id: int) -> int | None:
             "SELECT category_id FROM group_category_cache WHERE group_id = ?", (group_id,)
         ).fetchone()
     finally:
-        conn.close()
+        _release(conn)
     return row[0] if row else None
 
 
@@ -202,4 +216,4 @@ def set_group_category(group_id: int, category_id: int) -> None:
         )
         conn.commit()
     finally:
-        conn.close()
+        _release(conn)
