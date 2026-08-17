@@ -475,12 +475,37 @@ def _padding_penalty_from_ratios(structure_isk_ratio: float, avg_gang_size: floa
     return round(penalty, 1)
 
 
+
+# A pilot this consistently dangerous, this destructive, and this efficient
+# isn't padding - occasional structure/blob kills on a killboard like that
+# belong to a genuinely dangerous pilot (often an FC) rather than an eviction
+# padder, so the penalty is waived entirely rather than just reduced.
+PADDING_EXEMPT_DANGER_RATIO = 90
+PADDING_EXEMPT_ISK_DESTROYED = 1_000_000_000_000  # 1 trillion
+PADDING_EXEMPT_EFFICIENCY_PCT = 95
+
+
+def _is_padding_exempt(stats: dict) -> bool:
+    danger_ratio = stats.get("danger_ratio", 0) or 0
+    isk_destroyed = stats.get("isk_destroyed", 0) or 0
+    isk_lost = stats.get("isk_lost", 0) or 0
+    total_isk = isk_destroyed + isk_lost
+    efficiency_pct = (isk_destroyed / total_isk * 100) if total_isk else 0
+    return (
+        danger_ratio > PADDING_EXEMPT_DANGER_RATIO
+        and isk_destroyed > PADDING_EXEMPT_ISK_DESTROYED
+        and efficiency_pct > PADDING_EXEMPT_EFFICIENCY_PCT
+    )
+
+
 def compute_padding_penalty_pct(stats: dict) -> float:
     """Negative percentage to apply on top of the local group boost, per the
     "eviction fleet padder" pattern: high dangerRatio built almost entirely
     from structure kills and/or never fighting outside a large blob.
     """
     if not stats:
+        return 0.0
+    if _is_padding_exempt(stats):
         return 0.0
     return _padding_penalty_from_ratios(
         stats.get("structure_isk_ratio", 0) or 0, stats.get("avg_gang_size", 0) or 0
