@@ -86,7 +86,9 @@
             </td>
             <td>
               {% if r.recent_ships %}
-                {{ r.recent_ships | select | join(', ') }}
+                {% for ship in r.recent_ships %}
+                  <span class="ship-{{ ship.kind }}" title="{{ 'Muerto en esta nave' if ship.kind == 'loss' else 'Mató en esta nave' }}">{{ ship.name }}</span>{% if not loop.last %}, {% endif %}
+                {% endfor %}
               {% else %}
                 <span class="muted">Sin naves recientes</span>
               {% endif %}

@@ -353,6 +353,17 @@ def _parse_killmail_time(killmail_time: str) -> datetime:
     return datetime.strptime(killmail_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
+# A Higgs Anchor rig (Large or Medium) pins a ship in place purely for
+# roleplay screenshots - a "loss" involving one isn't a real combat death
+# and shouldn't show up as a ship this pilot actually flies in combat.
+ROLEPLAY_ANCHOR_RIG_TYPE_IDS = {34306, 34268}  # Large/Medium Higgs Anchor I
+
+
+def _is_anchored_roleplay_loss(victim: dict) -> bool:
+    item_type_ids = {item.get("item_type_id") for item in victim.get("items", [])}
+    return bool(item_type_ids & ROLEPLAY_ANCHOR_RIG_TYPE_IDS)
+
+
 def get_recent_activity(character_id: int) -> dict:
     """Ships flown and combat stats from the last 3 days, falling back to 7.
 
@@ -380,12 +391,14 @@ def get_recent_activity(character_id: int) -> dict:
             ],
         })
     for km in _fetch_recent_killmails(character_id, "losses"):
+        victim = km.get("victim", {})
         events.append({
             "time": _parse_killmail_time(km["killmail_time"]),
             "kind": "loss",
-            "ship_type_id": km.get("victim", {}).get("ship_type_id"),
+            "ship_type_id": victim.get("ship_type_id"),
             "isk": km.get("zkb", {}).get("totalValue", 0) or 0,
             "co_attackers": [],
+            "is_anchored_rp": _is_anchored_roleplay_loss(victim),
         })
     events.sort(key=lambda e: e["time"], reverse=True)
 
@@ -398,11 +411,21 @@ def get_recent_activity(character_id: int) -> dict:
     else:
         window, filtered = None, []
 
+    # Skip capsules (not a "ship" in any meaningful sense) and losses of
+    # roleplay-anchored hulls (not a real combat death) when picking which
+    # ships to surface as "recently flown".
     recent_ship_ids: list[int] = []
+    recent_ship_kinds: dict[int, str] = {}
     for e in filtered:
         tid = e["ship_type_id"]
-        if tid and tid not in recent_ship_ids:
+        if (
+            tid
+            and tid not in recent_ship_ids
+            and not e.get("is_anchored_rp")
+            and resolve_type_group_name(tid) != "Capsule"
+        ):
             recent_ship_ids.append(tid)
+            recent_ship_kinds[tid] = e["kind"]
         if len(recent_ship_ids) == 3:
             break
 
@@ -412,9 +435,15 @@ def get_recent_activity(character_id: int) -> dict:
 
     own_ship_ids = [e["ship_type_id"] for e in events if e["ship_type_id"]]  # kills+losses, full 7d
 
+    recent_ships = []
+    for tid in recent_ship_ids:
+        name = resolve_type_name(tid)
+        if name:
+            recent_ships.append({"name": name, "kind": recent_ship_kinds[tid]})
+
     return {
         "window": window,  # "3d", "7d", or None
-        "recent_ships": [resolve_type_name(tid) for tid in recent_ship_ids],
+        "recent_ships": recent_ships,
         "recent_kills": len(recent_kills),
         "recent_losses": len(recent_losses),
         "recent_isk_destroyed": sum(e["isk"] for e in recent_kills),
