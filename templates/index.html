@@ -146,60 +146,13 @@
     <p class="credit">Creado por Evangeline Shimada de Hispanic Revolution</p>
   </footer>
 
-  <script>
-    // Delegated on document (not the form directly) so it keeps working
-    // after a result swap replaces <main> - and with it, this form node.
-    document.addEventListener('submit', function (e) {
-      var form = e.target;
-      if (form.id !== 'analyze-form') return;
-      e.preventDefault();
-
-      var button = form.querySelector('button[type="submit"]');
-      var progressBox = document.getElementById('progress-indicator');
-      var progressText = document.getElementById('progress-text');
-      button.disabled = true;
-      progressBox.hidden = false;
-      progressText.textContent = 'Resolviendo nombres…';
-
-      fetch('/analyze/start', { method: 'POST', body: new FormData(form) })
-        .then(function (r) { return r.json(); })
-        .then(function (data) { pollProgress(data.job_id); })
-        .catch(function () {
-          progressText.textContent = 'Error al iniciar el análisis.';
-          button.disabled = false;
-        });
-
-      function pollProgress(jobId) {
-        fetch('/analyze/progress/' + jobId)
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            var text = document.getElementById('progress-text');
-            text.textContent = data.total > 0
-              ? 'Analizando ' + data.done + '/' + data.total + ' personajes…'
-              : 'Resolviendo nombres…';
-            if (data.finished) {
-              loadResult(jobId);
-            } else {
-              setTimeout(function () { pollProgress(jobId); }, 500);
-            }
-          })
-          .catch(function () {
-            document.getElementById('progress-text').textContent = 'Error consultando progreso.';
-          });
-      }
-
-      function loadResult(jobId) {
-        fetch('/analyze/result/' + jobId)
-          .then(function (r) { return r.text(); })
-          .then(function (html) {
-            var doc = new DOMParser().parseFromString(html, 'text/html');
-            document.querySelector('main').outerHTML = doc.querySelector('main').outerHTML;
-          })
-          .catch(function () {
-            document.getElementById('progress-text').textContent = 'Error obteniendo resultados.';
-          });
-      }
-    });
-  </script>
+  <!--
+    The async /analyze/start + progress-polling flow is temporarily disabled:
+    on Render (Linux), a background thread's first-ever Turso connection
+    hangs indefinitely - reproduced live, but NOT reproducible locally on
+    Windows (different compiled libsql binary), so it needs a fix that can
+    be verified against Linux before re-enabling. The form below falls back
+    to the plain synchronous POST /analyze route in the meantime.
+  -->
 </body>
 </html>
