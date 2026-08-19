@@ -154,6 +154,31 @@ tr.danger-low .score-analyzed { color: var(--low); }
 
 .zkb-link:hover { opacity: 1; }
 
+.progress-indicator {
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.progress-indicator:not([hidden]) {
+  display: flex;
+}
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 footer {
   max-width: 900px;
   margin: 2rem auto 0;

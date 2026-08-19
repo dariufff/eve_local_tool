@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import difflib
 import re
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 
 import cache
 import eve_api
@@ -125,9 +127,18 @@ def _fetch_character_record(char_id: int, name: str, public_info: dict) -> dict:
     return record
 
 
-def build_report(names: list[str]) -> tuple[list[dict], list[str]]:
+def build_report(
+    names: list[str], on_progress: callable = None, on_resolved: callable = None
+) -> tuple[list[dict], list[str]]:
+    """`on_resolved`, if given, is called once with the resolved character
+    count right after name resolution. `on_progress` is then called once per
+    character (cached or freshly fetched) as it finishes. Together these
+    drive the live progress counter for the async /analyze/start job below.
+    """
     resolved = eve_api.resolve_names(names)
     unresolved = [n for n in names if n.strip() and n.strip() not in resolved]
+    if on_resolved:
+        on_resolved(len(resolved))
 
     results = []
     to_fetch: list[tuple[int, str]] = []  # (character_id, name) not in cache
@@ -135,6 +146,8 @@ def build_report(names: list[str]) -> tuple[list[dict], list[str]]:
         cached = cache.get(info["id"])
         if cached is not None and cached.get("score_version") == SCORE_VERSION:
             results.append(cached)
+            if on_progress:
+                on_progress()
         else:
             to_fetch.append((info["id"], name))
 
@@ -150,7 +163,12 @@ def build_report(names: list[str]) -> tuple[list[dict], list[str]]:
                 executor.submit(_fetch_character_record, cid, name, public_infos.get(cid, {}))
                 for cid, name in to_fetch
             ]
-            results.extend(future.result() for future in futures)
+            # as_completed (not the submission order) so progress advances
+            # as results actually land, not just as fast as the slowest one.
+            for future in as_completed(futures):
+                results.append(future.result())
+                if on_progress:
+                    on_progress()
 
     apply_local_danger_score(results)
     detect_multibox_groups(results)
@@ -332,11 +350,94 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
+    """Synchronous fallback for when JS is unavailable - the normal flow
+    goes through /analyze/start below instead, for the progress counter.
+    """
     raw_input = request.form.get("names", "")
     names = [line.strip() for line in raw_input.splitlines() if line.strip()]
     results, unresolved = build_report(names)
     return render_template(
         "index.html", results=results, unresolved=unresolved, raw_input=raw_input
+    )
+
+
+# In-memory job store backing the live "X/Y personajes analizados" progress
+# bar. Works because we run a single gunicorn worker (see Procfile) - all
+# requests share this process's memory. If that ever changes to multiple
+# workers, this would need to move to something shared like Redis.
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _run_analysis_job(job_id: str, names: list[str]) -> None:
+    def on_resolved(total: int) -> None:
+        with _jobs_lock:
+            _jobs[job_id]["total"] = total
+
+    def on_progress() -> None:
+        with _jobs_lock:
+            _jobs[job_id]["done"] += 1
+
+    try:
+        results, unresolved = build_report(names, on_progress=on_progress, on_resolved=on_resolved)
+        with _jobs_lock:
+            _jobs[job_id]["results"] = results
+            _jobs[job_id]["unresolved"] = unresolved
+            _jobs[job_id]["finished"] = True
+    except Exception as exc:  # noqa: BLE001 - must not leave the job hanging
+        with _jobs_lock:
+            _jobs[job_id]["error"] = str(exc)
+            _jobs[job_id]["finished"] = True
+
+
+@app.route("/analyze/start", methods=["POST"])
+def analyze_start():
+    raw_input = request.form.get("names", "")
+    names = [line.strip() for line in raw_input.splitlines() if line.strip()]
+
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "total": 0,
+            "done": 0,
+            "finished": False,
+            "results": None,
+            "unresolved": None,
+            "error": None,
+            "raw_input": raw_input,
+        }
+    threading.Thread(target=_run_analysis_job, args=(job_id, names), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/analyze/progress/<job_id>")
+def analyze_progress(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify(
+            {"total": job["total"], "done": job["done"], "finished": job["finished"]}
+        )
+
+
+@app.route("/analyze/result/<job_id>")
+def analyze_result(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is not None and job["finished"]:
+            del _jobs[job_id]  # one-shot: the client only ever fetches this once
+    if not job:
+        return jsonify({"error": "not_found"}), 404
+    if not job["finished"]:
+        return jsonify({"error": "not_ready"}), 409
+    if job["error"]:
+        return jsonify({"error": job["error"]}), 500
+    return render_template(
+        "index.html",
+        results=job["results"],
+        unresolved=job["unresolved"],
+        raw_input=job["raw_input"],
     )
 
 
